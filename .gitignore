@@ -1,0 +1,16 @@
+# build output
+main.js
+
+# deps
+node_modules/
+package-lock.json
+
+# editor / os
+.DS_Store
+*.log
+
+# obsidian test vault symlink target (if any)
+data.json
+
+# claude code local tooling
+.claude/
