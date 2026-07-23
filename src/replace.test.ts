@@ -4,6 +4,7 @@ import {
   buildMatcher,
   expandReplacement,
   findMatches,
+  pathInFolder,
 } from "./replace";
 
 function mustRegex(opts: Parameters<typeof buildMatcher>[0]): RegExp {
@@ -104,6 +105,46 @@ describe("expandReplacement", () => {
 
   test("plain replacement with no tokens is returned as-is", () => {
     expect(expandReplacement(match, "REDACTED")).toBe("REDACTED");
+  });
+
+  test("a non-participating optional group substitutes empty, not literal $N", () => {
+    const re = mustRegex({ query: "(foo)?bar", mode: "regex" });
+    const m = findMatches("bar", re)[0];
+    expect(expandReplacement(m, "<$1>")).toBe("<>");
+  });
+
+  test("out-of-range two-digit token falls back to $1 then the extra digit", () => {
+    const re = mustRegex({ query: "(a)", mode: "regex" });
+    const m = findMatches("a", re)[0]; // one group
+    expect(expandReplacement(m, "$15")).toBe("a5");
+  });
+
+  test("a token with no such group is left literal", () => {
+    const re = mustRegex({ query: "(a)", mode: "regex" });
+    const m = findMatches("a", re)[0];
+    expect(expandReplacement(m, "$3")).toBe("$3");
+  });
+});
+
+describe("pathInFolder", () => {
+  test("empty folder means the vault root — root-level files only", () => {
+    expect(pathInFolder("note.md", "")).toBe(true);
+    expect(pathInFolder("sub/note.md", "")).toBe(false);
+  });
+
+  test("a named folder matches its files recursively", () => {
+    expect(pathInFolder("sub/note.md", "sub")).toBe(true);
+    expect(pathInFolder("sub/deep/note.md", "sub")).toBe(true);
+    expect(pathInFolder("note.md", "sub")).toBe(false);
+  });
+
+  test("does not match a sibling folder with a shared prefix", () => {
+    expect(pathInFolder("subtwo/note.md", "sub")).toBe(false);
+  });
+
+  test("normalizes leading/trailing slashes", () => {
+    expect(pathInFolder("sub/note.md", "/sub/")).toBe(true);
+    expect(pathInFolder("root.md", "/")).toBe(true);
   });
 });
 

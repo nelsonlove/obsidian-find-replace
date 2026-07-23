@@ -59,6 +59,12 @@ export function findMatches(text: string, regex: RegExp): Match[] {
   const re = new RegExp(regex.source, flags);
 
   const matches: Match[] = [];
+  // Track line/lineStart incrementally: `scanned` only moves forward across the
+  // whole text, so line counting is O(n) total rather than O(n·matches).
+  let line = 0;
+  let lineStart = 0;
+  let scanned = 0;
+
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m[0].length === 0) {
@@ -67,10 +73,14 @@ export function findMatches(text: string, regex: RegExp): Match[] {
       continue;
     }
     const start = m.index;
-    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    for (; scanned < start; scanned++) {
+      if (text.charCodeAt(scanned) === 10) {
+        line++;
+        lineStart = scanned + 1;
+      }
+    }
     let lineEnd = text.indexOf("\n", start);
     if (lineEnd === -1) lineEnd = text.length;
-    const line = countNewlines(text, start);
     matches.push({
       start,
       end: start + m[0].length,
@@ -84,12 +94,15 @@ export function findMatches(text: string, regex: RegExp): Match[] {
   return matches;
 }
 
-function countNewlines(text: string, upto: number): number {
-  let n = 0;
-  for (let i = 0; i < upto; i++) {
-    if (text.charCodeAt(i) === 10) n++;
-  }
-  return n;
+/**
+ * Whether a vault-relative markdown path belongs to `folder`. An empty folder
+ * (or "/") means the vault root — root-level files only, never the whole vault.
+ * A named folder matches its files recursively.
+ */
+export function pathInFolder(path: string, folder: string): boolean {
+  const norm = folder.replace(/^\/+/, "").replace(/\/+$/, "");
+  if (norm === "") return !path.includes("/");
+  return path.startsWith(norm + "/");
 }
 
 const TOKEN_RE = /\$(\$|&|\d{1,2})/g;
@@ -99,10 +112,18 @@ export function expandReplacement(match: Match, replacement: string): string {
     if (p1 === "$") return "$";
     if (p1 === "&") return match.groups[0] ?? "";
     const n = Number(p1);
-    if (n >= 1 && n < match.groups.length && match.groups[n] !== undefined) {
-      return match.groups[n] as string;
+    // In-range group: substitute its value (empty for a non-participating
+    // optional group), matching standard find/replace semantics.
+    if (n >= 1 && n < match.groups.length) return match.groups[n] ?? "";
+    // Out-of-range two-digit token: fall back to the single-digit group plus the
+    // trailing digit as a literal (e.g. "$15" -> group 1 + "5"), like JS.
+    if (p1.length === 2) {
+      const first = Number(p1[0]);
+      if (first >= 1 && first < match.groups.length) {
+        return (match.groups[first] ?? "") + p1[1];
+      }
     }
-    return token; // e.g. "$7" with no 7th group — leave literal
+    return token; // no such group — leave the token literal
   });
 }
 

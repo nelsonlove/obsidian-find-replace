@@ -6,6 +6,7 @@ import {
   buildMatcher,
   expandReplacement,
   findMatches,
+  pathInFolder,
 } from "./replace";
 
 const VIEW_TYPE = "find-replace-view";
@@ -80,6 +81,8 @@ class FindReplaceView extends ItemView {
   private footerEl!: HTMLElement;
 
   private hits: Hit[] = [];
+  /** The "→ after" preview spans, so they can refresh when Replace-with edits. */
+  private afterEls: { el: HTMLElement; match: Match }[] = [];
 
   constructor(leaf: WorkspaceLeaf, plugin: FindReplacePlugin) {
     super(leaf);
@@ -117,6 +120,9 @@ class FindReplaceView extends ItemView {
       cls: "fr-input",
       attr: { type: "text", placeholder: "Replace with" },
     });
+    // Keep the previewed "→ after" text in sync with the Replace-with field so
+    // what you see is what Apply writes, even without re-searching.
+    this.replaceInput.addEventListener("input", () => this.refreshPreviews());
 
     const opts = controls.createDiv({ cls: "fr-options" });
     this.modeSelect = opts.createEl("select", { cls: "fr-mode" });
@@ -180,12 +186,11 @@ class FindReplaceView extends ItemView {
       const f = workspace.getActiveFile();
       return f ? [f] : [];
     }
-    // folder
-    const raw = this.folderInput.value.replace(/\/+$/, "");
-    const prefix = raw === "" ? "" : raw + "/";
+    // folder — empty/root matches root-level files only, never the whole vault
+    const folder = this.folderInput.value;
     return vault
       .getMarkdownFiles()
-      .filter((f) => (prefix === "" ? true : f.path.startsWith(prefix)));
+      .filter((f) => pathInFolder(f.path, folder));
   }
 
   private async runSearch() {
@@ -208,40 +213,58 @@ class FindReplaceView extends ItemView {
         this.renderResults(0, false);
         return;
       }
-      const matches = findMatches(text, built.regex).map((m) => ({
-        ...m,
-        checked: true,
-      }));
-      if (matches.length) this.hits.push({ file: null, content: text, matches });
-      total = matches.length;
-    } else {
-      const files = await this.filesForScope(scope);
-      for (const file of files) {
-        if (total >= MAX_MATCHES) {
-          capped = true;
-          break;
-        }
-        const content = await this.plugin.app.vault.cachedRead(file);
-        const found = findMatches(content, built.regex);
-        if (found.length === 0) continue;
-        const room = MAX_MATCHES - total;
-        const slice = found.slice(0, room);
-        if (slice.length < found.length) capped = true;
+      const found = findMatches(text, built.regex);
+      const slice = found.slice(0, MAX_MATCHES);
+      if (slice.length < found.length) capped = true;
+      if (slice.length) {
         this.hits.push({
-          file,
-          content,
+          file: null,
+          content: text,
           matches: slice.map((m) => ({ ...m, checked: true })),
         });
-        total += slice.length;
+      }
+      total = slice.length;
+    } else {
+      const files = await this.filesForScope(scope);
+      const { vault } = this.plugin.app;
+      const BATCH = 32;
+      outer: for (let i = 0; i < files.length; i += BATCH) {
+        const batch = files.slice(i, i + BATCH);
+        const contents = await Promise.all(batch.map((f) => vault.cachedRead(f)));
+        for (let j = 0; j < batch.length; j++) {
+          if (total >= MAX_MATCHES) {
+            capped = true;
+            break outer;
+          }
+          const found = findMatches(contents[j], built.regex);
+          if (found.length === 0) continue;
+          const room = MAX_MATCHES - total;
+          const slice = found.slice(0, room);
+          if (slice.length < found.length) capped = true;
+          this.hits.push({
+            file: batch[j],
+            content: contents[j],
+            matches: slice.map((m) => ({ ...m, checked: true })),
+          });
+          total += slice.length;
+        }
       }
     }
 
     this.renderResults(total, capped);
   }
 
+  private refreshPreviews() {
+    const replacement = this.replaceInput.value;
+    for (const { el, match } of this.afterEls) {
+      el.setText(expandReplacement(match, replacement));
+    }
+  }
+
   private renderResults(total: number, capped: boolean) {
     this.resultsEl.empty();
     this.footerEl.empty();
+    this.afterEls = [];
 
     if (total === 0) {
       this.resultsEl.createDiv({ cls: "fr-empty", text: "No matches." });
@@ -275,10 +298,11 @@ class FindReplaceView extends ItemView {
         const preview = row.createSpan({ cls: "fr-preview" });
         preview.createSpan({ cls: "fr-before", text: m.matched });
         preview.createSpan({ text: " → " });
-        preview.createSpan({
+        const afterEl = preview.createSpan({
           cls: "fr-after",
           text: expandReplacement(m, replacement),
         });
+        this.afterEls.push({ el: afterEl, match: m });
       }
 
       fileCheck.addEventListener("change", () => {
@@ -324,10 +348,13 @@ class FindReplaceView extends ItemView {
   private async apply() {
     const n = this.checkedCount();
     if (n === 0) return;
+    const affected = this.hits.filter((h) =>
+      h.matches.some((m) => m.checked),
+    ).length;
     if (
       n >= CONFIRM_THRESHOLD &&
       !window.confirm(
-        `Replace ${n} matches across ${this.hits.length} location(s)? This cannot be undone in one step.`,
+        `Replace ${n} matches across ${affected} location(s)? This cannot be undone in one step.`,
       )
     ) {
       return;
