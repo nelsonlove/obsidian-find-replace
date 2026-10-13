@@ -1,6 +1,6 @@
 {
   "name": "obsidian-find-replace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Multi-file find & replace for Obsidian with preview-and-confirm.",
   "type": "module",
   "main": "main.js",

@@ -4,6 +4,10 @@ All notable changes to Find & Replace are listed here. The release workflow copi
 
 ## Unreleased
 
+- 
+
+## 0.2.0 — 2026-10-13
+
 - `minAppVersion` is now 1.7.2: the panel uses `Workspace.revealLeaf`, which became asynchronous in that release and is awaited.
 - The large-replacement confirmation is an in-app modal instead of `window.confirm`.
 - Command names no longer repeat the plugin name ("Open panel", "Search the current file's folder") and UI text uses sentence case.
