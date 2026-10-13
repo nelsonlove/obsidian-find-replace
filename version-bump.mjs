@@ -8,15 +8,21 @@ if (!targetVersion) {
   process.exit(1);
 }
 
+// Every file is read before it is written, so a failure at the end can put the exact bytes back.
+const originals = new Map();
 const written = [];
+function write(path, text) {
+  if (!originals.has(path)) originals.set(path, readFileSync(path, "utf8"));
+  writeFileSync(path, text);
+  written.push(path);
+}
 
 function rewrite(path, change) {
   const raw = readFileSync(path, "utf8");
   const data = JSON.parse(raw);
   change(data);
   const indent = raw.match(/^[ \t]+/m)?.[0] ?? "\t";
-  writeFileSync(path, JSON.stringify(data, null, indent) + "\n");
-  written.push(path);
+  write(path, JSON.stringify(data, null, indent) + "\n");
   return data;
 }
 
@@ -42,8 +48,7 @@ if (existsSync("CHANGELOG.md")) {
     while (body.length && body[0].trim() === "") body.shift();
     while (body.length && body[body.length - 1].trim() === "") body.pop();
     const section = [`## ${targetVersion} — ${today}`, "", ...(body.length ? [...body, ""] : [])];
-    writeFileSync("CHANGELOG.md", [...lines.slice(0, start), lines[start].trim(), "", "-", "", ...section, ...lines.slice(end)].join("\n"));
-    written.push("CHANGELOG.md");
+    write("CHANGELOG.md", [...lines.slice(0, start), lines[start].trim(), "", "-", "", ...section, ...lines.slice(end)].join("\n"));
   } else {
     console.error("version-bump: CHANGELOG.md has no '## Unreleased' section; nothing rolled into the release notes");
   }
@@ -71,7 +76,9 @@ if (inGit) {
     try {
       execFileSync("git", ["add", ...stageable], { stdio: "inherit" });
     } catch (e) {
-      console.error(`version-bump: git add failed (${e.message}); the bump is not staged, stopping before npm commits a half-done release`);
+      // Put the files back as they were; npm's own package.json bump is the one change left, and npm reports the failure.
+      for (const [path, text] of originals) writeFileSync(path, text);
+      console.error(`version-bump: git add failed (${e.message}); ${[...originals.keys()].join(", ")} were put back as they were, and nothing is staged. Fix git (an index.lock?) and run npm version again.`);
       process.exit(1);
     }
   }

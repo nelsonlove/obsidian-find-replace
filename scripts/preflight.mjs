@@ -5,11 +5,11 @@
 // Usage: node scripts/preflight.mjs [--root <dir>] [--tag <tag>] [--release] [--offline] [--strict] [--json]
 //   --root     the plugin repo (default: current directory)
 //   --tag      the git tag being released; must equal the manifest version exactly
-//   --release  also require the built assets (main.js, manifest.json) to exist
-//   --offline  skip the community directory fetch
+//   --release  also require the built assets (main.js, manifest.json) to exist, and fail on template placeholders left in the docs
+//   --offline  skip the network checks (directory id collision, private vulnerability reporting)
 //   --strict   warnings fail too
 //   --json     machine-readable output
-// Exit 0 when every check passes (warnings allowed unless --strict), 1 otherwise.
+// Exit 0 when every check passes (warnings allowed unless --strict), 1 otherwise. A usage error is reported the same way, as a FAIL line (or in the JSON), never as a bare crash.
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
@@ -17,29 +17,47 @@ import { execFileSync } from "node:child_process";
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
-// `--name value`; undefined when absent or when the next token is itself a flag, so `--root --offline` is a usage error, not a directory called --offline.
-const value = (name) => {
-  const i = args.indexOf(name);
-  if (i === -1) return undefined;
-  if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
-    console.error(`FAIL  usage  — ${name} needs a value`);
-    process.exit(1);
-  }
-  return args[i + 1];
-};
-
-const root = resolve(value("--root") ?? ".");
-if (!existsSync(root) || !statSync(root).isDirectory()) {
-  console.error(`FAIL  root  — ${root} is not a directory`);
-  process.exit(1);
-}
 const results = [];
 const pass = (check, note = "") => results.push({ level: "PASS", check, note });
 const warn = (check, note) => results.push({ level: "WARN", check, note });
 const fail = (check, note) => results.push({ level: "FAIL", check, note });
 
+// `--name value`; a missing value, or a following flag in its place, is a usage failure recorded like any other result.
+const value = (name) => {
+  const i = args.indexOf(name);
+  if (i === -1) return undefined;
+  if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+    fail("usage", `${name} needs a value`);
+    return undefined;
+  }
+  return args[i + 1];
+};
+
 const DIRECTORY_URL = "https://raw.githubusercontent.com/obsidianmd/obsidian-releases/HEAD/community-plugins.json";
 const DESCRIPTION_MAX = 250;
+
+function report() {
+  const failures = results.filter((r) => r.level === "FAIL");
+  const warnings = results.filter((r) => r.level === "WARN");
+  const ok = failures.length === 0 && (!flag("--strict") || warnings.length === 0);
+  if (flag("--json")) {
+    console.log(JSON.stringify({ ok, root, results }, null, 2));
+  } else {
+    for (const r of results) console.log(`${r.level.padEnd(4)}  ${r.check}${r.note ? `  — ${r.note}` : ""}`);
+    console.log("");
+    console.log(`${failures.length} failed, ${warnings.length} warnings, ${results.length - failures.length - warnings.length} passed${flag("--strict") ? " (strict)" : ""}`);
+  }
+  process.exit(ok ? 0 : 1);
+}
+
+const rootArg = value("--root");
+const tag = value("--tag");
+const root = resolve(rootArg ?? ".");
+if (results.some((r) => r.check === "usage")) report();
+if (!existsSync(root) || !statSync(root).isDirectory()) {
+  fail("root", `${root} is not a directory`);
+  report();
+}
 
 function readJson(rel) {
   const path = join(root, rel);
@@ -51,6 +69,8 @@ function readJson(rel) {
   }
 }
 
+const readText = (rel) => (existsSync(join(root, rel)) ? readFileSync(join(root, rel), "utf8") : null);
+
 function git(...argv) {
   try {
     return execFileSync("git", argv, { cwd: root, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
@@ -59,12 +79,13 @@ function git(...argv) {
   }
 }
 
-function githubSlug() {
+// Computed once: the repo's GitHub slug from origin, and whether we are in a git work tree.
+const inGit = git("rev-parse", "--is-inside-work-tree") === "true";
+const slug = (() => {
   const url = git("remote", "get-url", "origin");
-  if (!url) return null;
-  const m = url.match(/github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/);
+  const m = url?.match(/github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/);
   return m ? m[1] : null;
-}
+})();
 
 function sourceFiles() {
   const out = [];
@@ -163,7 +184,6 @@ else {
 // The workflows run `npm ci` with the npm cache, and both abort without a committed lockfile; better to learn that here than after the tag is pushed.
 {
   const lock = ["package-lock.json", "npm-shrinkwrap.json"].find((n) => existsSync(join(root, n)));
-  const inGit = git("rev-parse", "--is-inside-work-tree") === "true";
   if (!lock) fail("package-lock.json", "missing; the release and CI workflows run npm ci, which needs it (run npm install and commit the lockfile)");
   else if (inGit && !git("ls-files", "--error-unmatch", lock)) fail(lock, "exists but is not committed (gitignored or untracked); the workflows check out the repo, so commit it and remove it from .gitignore");
   else pass(lock, inGit ? "committed" : "present");
@@ -171,8 +191,8 @@ else {
 
 // `npm version` is wired up by the version script; without tag-version-prefix= it tags v1.2.3, which the release workflow ignores.
 if (pkgRead.data?.scripts?.version) {
-  const npmrc = join(root, ".npmrc");
-  const has = existsSync(npmrc) && readFileSync(npmrc, "utf8").split("\n").some((l) => l.trim() === "tag-version-prefix=");
+  const npmrc = readText(".npmrc");
+  const has = npmrc !== null && npmrc.split("\n").some((l) => l.trim() === "tag-version-prefix=");
   if (has) pass(".npmrc", "tag-version-prefix= set");
   else warn(".npmrc", "no tag-version-prefix= line; npm version would tag v1.2.3, which the release workflow ignores (kit-adopt adds the line)");
 }
@@ -190,9 +210,9 @@ else if (manifest?.version) {
 
 // --- root files -------------------------------------------------------------
 
-if (!existsSync(join(root, "README.md"))) fail("README.md", "missing");
+const readme = readText("README.md");
+if (readme === null) fail("README.md", "missing");
 else {
-  const readme = readFileSync(join(root, "README.md"), "utf8");
   pass("README.md", "present");
   if (!/^#{1,3} /m.test(readme)) warn("README.md", "has no headings; the review expects purpose, install, use and support");
   if (manifest?.isDesktopOnly === true && !/desktop/i.test(readme)) warn("README.md", "isDesktopOnly is true but the README does not say why");
@@ -201,18 +221,18 @@ else {
 const licenseFile = readdirSync(root).find((n) => /^licen[cs]e(\.(md|txt))?$/i.test(n));
 if (!licenseFile) fail("LICENSE", "missing");
 else pass("LICENSE", licenseFile);
-if (!existsSync(join(root, "SECURITY.md"))) warn("SECURITY.md", "missing; a private reporting route is expected");
+const security = readText("SECURITY.md");
+if (security === null) warn("SECURITY.md", "missing; a private reporting route is expected");
 
-// The kit's README and PRIVACY templates carry a "<!-- TODO" and two sentences joined by " / " for the maintainer to resolve; a release must not ship either.
-for (const doc of ["README.md", "PRIVACY.md", "SECURITY.md"]) {
-  const p = join(root, doc);
-  if (!existsSync(p)) continue;
-  const text = readFileSync(p, "utf8");
+// The kit's README and PRIVACY templates carry a "<!-- TODO" and two sentences joined by " / " for the maintainer to resolve. A release must not ship either, so under --release this fails; otherwise it warns.
+const docs = { "README.md": readme, "PRIVACY.md": readText("PRIVACY.md"), "SECURITY.md": security };
+for (const [doc, text] of Object.entries(docs)) {
+  if (text === null) continue;
   const problems = [];
   if (/<!--\s*TODO/i.test(text)) problems.push('a "<!-- TODO" comment');
   // The template's shape exactly: one line, a sentence ending in a period, " / ", then a capitalised alternative. Not a shortcut like "Cmd+. / Ctrl+." or prose across lines.
   if (/^.+[a-z`)]\. \/ [A-Z`].+$/m.test(text)) problems.push('two sentences joined by " / "');
-  if (problems.length) warn(`${doc}: placeholders`, `${problems.join(" and ")} left from the template; keep the true sentence and delete the rest`);
+  if (problems.length) (flag("--release") ? fail : warn)(`${doc}: placeholders`, `${problems.join(" and ")} left from the template; keep the true sentence and delete the rest`);
 }
 
 // --- source -----------------------------------------------------------------
@@ -248,18 +268,16 @@ else {
 
 // --- git ----------------------------------------------------------------------
 
-if (git("rev-parse", "--is-inside-work-tree") === "true") {
+if (inGit) {
   const tracked = git("ls-files", "--error-unmatch", "main.js");
   if (tracked) warn("git: main.js", "is committed; it is a release asset, not source (add it to .gitignore)");
   else pass("git: main.js", "not tracked");
-  const slug = githubSlug();
   if (!slug) warn("git: origin", "is not a GitHub repo; the directory entry needs one");
   else pass("git: origin", slug);
 }
 
 // --- tag and release --------------------------------------------------------
 
-const tag = value("--tag");
 if (tag !== undefined && manifest?.version) {
   const bare = tag.replace(/^refs\/tags\//, "");
   if (/^v/.test(bare)) fail("tag", `"${bare}" starts with "v"; tags carry the bare version`);
@@ -275,36 +293,33 @@ if (flag("--release")) {
   pass("release asset styles.css", existsSync(join(root, "styles.css")) ? "present, will be attached" : "absent, not attached");
 }
 
-// --- directory ------------------------------------------------------------
+// --- network ----------------------------------------------------------------
+// Each check returns its entries; they are appended in a fixed order after both finish, so the report does not depend on which fetch answered first.
 
 async function checkDirectory() {
-  if (flag("--offline") || !manifest?.id) return;
+  const out = [];
+  if (!manifest?.id) return out;
   let list;
   try {
     const res = await fetch(DIRECTORY_URL, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     list = await res.json();
   } catch (e) {
-    warn("directory", `could not fetch community-plugins.json (${e.message}); rerun online or pass --offline`);
-    return;
+    return [["WARN", "directory", `could not fetch community-plugins.json (${e.message}); rerun online or pass --offline`]];
   }
-  const slug = githubSlug();
   const byId = list.find((p) => p.id === manifest.id);
-  if (byId && slug && byId.repo.toLowerCase() === slug.toLowerCase()) pass("directory: id", `${manifest.id} is already listed for ${slug}`);
-  // Under --release a tag is already pushed, and a listed plugin whose repo moved would otherwise be blocked from ever releasing; the id is claimed in kit-submit, where this stays a failure.
-  else if (byId && flag("--release")) warn("directory: id", `"${manifest.id}" is listed for ${byId.repo}, not ${slug ?? "this repo"}; fine if the repo moved, otherwise choose another id`);
-  else if (byId) fail("directory: id", `"${manifest.id}" is taken by ${byId.repo}; choose another id`);
-  else pass("directory: id", `${manifest.id} is free`);
+  if (byId && slug && byId.repo.toLowerCase() === slug.toLowerCase()) out.push(["PASS", "directory: id", `${manifest.id} is already listed for ${slug}`]);
+  // A listed id under another repo is a warning here: a plugin whose repo moved must still release and preflight. kit-submit refuses to claim an id that is taken.
+  else if (byId) out.push(["WARN", "directory: id", `"${manifest.id}" is listed for ${byId.repo}, not ${slug ?? "this repo"}; fine if the repo moved, otherwise choose another id (kit-submit refuses a taken id)`]);
+  else out.push(["PASS", "directory: id", `${manifest.id} is free`]);
   const byName = list.find((p) => p.name.toLowerCase() === String(manifest.name).toLowerCase() && p.id !== manifest.id);
-  if (byName) warn("directory: name", `"${manifest.name}" is already used by ${byName.repo} (${byName.id})`);
+  if (byName) out.push(["WARN", "directory: name", `"${manifest.name}" is already used by ${byName.repo} (${byName.id})`]);
+  return out;
 }
 
 // SECURITY.md (the kit's template) promises GitHub private vulnerability reporting, which is off by default; check the promise. The endpoint answers without a token for a public repo; a GITHUB_TOKEN / GH_TOKEN (CI, or a private repo) is sent when present.
 async function checkPrivateReporting() {
-  if (flag("--offline")) return;
-  const slug = githubSlug();
-  const securityPath = join(root, "SECURITY.md");
-  if (!slug || !existsSync(securityPath) || !/private vulnerability reporting is enabled/i.test(readFileSync(securityPath, "utf8"))) return;
+  if (!slug || security === null || !/private vulnerability reporting is enabled/i.test(security)) return [];
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   const headers = { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
   let outcome;
@@ -315,25 +330,14 @@ async function checkPrivateReporting() {
   } catch (e) {
     outcome = e.message;
   }
-  if (outcome === "on") pass("SECURITY.md: private reporting", "enabled on GitHub, as the file says");
-  else if (outcome === "off") warn("SECURITY.md: private reporting", `the file says it is enabled; it is not. Run: gh api -X PUT repos/${slug}/private-vulnerability-reporting`);
-  else warn("SECURITY.md: private reporting", `could not check (${outcome}); the file says it is enabled`);
+  if (outcome === "on") return [["PASS", "SECURITY.md: private reporting", "enabled on GitHub, as the file says"]];
+  if (outcome === "off") return [["WARN", "SECURITY.md: private reporting", `the file says it is enabled; it is not. Run: gh api -X PUT repos/${slug}/private-vulnerability-reporting`]];
+  return [["WARN", "SECURITY.md: private reporting", `could not check (${outcome}); the file says it is enabled`]];
 }
 
-// The two network checks are independent; run them together so a slow network costs one timeout, not two.
-await Promise.all([checkDirectory(), checkPrivateReporting()]);
-
-// --- report -----------------------------------------------------------------
-
-const failures = results.filter((r) => r.level === "FAIL");
-const warnings = results.filter((r) => r.level === "WARN");
-const ok = failures.length === 0 && (!flag("--strict") || warnings.length === 0);
-
-if (flag("--json")) {
-  console.log(JSON.stringify({ ok, root, results }, null, 2));
-} else {
-  for (const r of results) console.log(`${r.level.padEnd(4)}  ${r.check}${r.note ? `  — ${r.note}` : ""}`);
-  console.log("");
-  console.log(`${failures.length} failed, ${warnings.length} warnings, ${results.length - failures.length - warnings.length} passed${flag("--strict") ? " (strict)" : ""}`);
+if (!flag("--offline")) {
+  const [directory, reporting] = await Promise.all([checkDirectory(), checkPrivateReporting()]);
+  for (const [level, check, note] of [...directory, ...reporting]) results.push({ level, check, note });
 }
-process.exit(ok ? 0 : 1);
+
+report();
