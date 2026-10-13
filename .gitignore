@@ -3,7 +3,6 @@ main.js
 
 # deps
 node_modules/
-package-lock.json
 
 # editor / os
 .DS_Store

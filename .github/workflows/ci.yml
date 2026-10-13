@@ -1,0 +1,44 @@
+name: CI
+
+# Pushes to the default branch and every pull request; a feature branch with an open PR runs once, not twice.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # The Obsidian team's own rules (eslint-plugin-obsidianmd): command ids, sentence case, global app, forbidden DOM, manifest and LICENSE shape. Runs when the repo has a flat config; kit-adopt writes one.
+      - name: Lint
+        run: |
+          if ls eslint.config.* >/dev/null 2>&1; then
+            npx eslint .
+          else
+            echo "no eslint.config.*; skipping (kit-adopt adds one, then npm i -D eslint eslint-plugin-obsidianmd)"
+          fi
+
+      - name: Test
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
+            npm test
+          else
+            echo "no test script; skipping"
+          fi
+
+      - name: Preflight
+        run: node scripts/preflight.mjs --offline

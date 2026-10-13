@@ -8,15 +8,25 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "preflight": "node scripts/preflight.mjs",
+    "lint": "eslint .",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
-  "keywords": ["obsidian", "find", "replace", "regex", "search"],
+  "keywords": [
+    "obsidian",
+    "find",
+    "replace",
+    "regex",
+    "search"
+  ],
   "author": "Nelson Love",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "builtin-modules": "^3.3.0",
     "esbuild": "^0.20.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.2",
     "obsidian": "latest",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
