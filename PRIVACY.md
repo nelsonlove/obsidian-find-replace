@@ -1,5 +1,5 @@
 # Privacy
 
-Find & Replace stores its settings in your vault's configuration folder (`.obsidian/plugins/find-replace/data.json`) and nowhere else.
+Find & Replace has no settings and stores nothing: no `data.json`, no cache, no history of searches or replacements.
 
-It collects no telemetry. If a feature needs the network, the README names the endpoint and what is sent; otherwise nothing leaves your machine.
+It collects no telemetry and makes no network requests. Nothing leaves your machine.

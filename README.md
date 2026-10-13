@@ -6,8 +6,11 @@ review the matches and click **Apply**.
 
 ## Use
 
-Open the panel from the ribbon (**Find & Replace** icon) or the command
-**"Find & Replace: Open Find & Replace panel"**. Then:
+Needs Obsidian 1.7.2 or newer.
+
+Open the panel from the ribbon (**Find & replace** icon) or the command
+**"Find & Replace: Open panel"** (there is also **"Find & Replace: Search the
+current file's folder"**). Then:
 
 1. Type a **Find** and **Replace with** value.
 2. Pick **Text** or **Regex**, and optionally case / whole-word.

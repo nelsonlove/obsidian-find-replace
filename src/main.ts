@@ -406,23 +406,38 @@ class FindReplaceView extends ItemView {
   }
 }
 
-/** An in-app yes/no question, in place of window.confirm, which blocks the renderer and looks foreign. Resolves false when the modal is dismissed any other way. */
-function confirmInModal(app: App, message: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    let answered = false;
-    const modal = new Modal(app);
-    modal.contentEl.createEl("p", { text: message });
-    const row = modal.contentEl.createDiv({ cls: "modal-button-container" });
-    row.createEl("button", { text: "Cancel" }).addEventListener("click", () => modal.close());
-    const ok = row.createEl("button", { cls: "mod-warning", text: "Replace" });
+/** An in-app yes/no question, in place of window.confirm, which blocks the renderer and looks foreign. The confirming button has focus when the modal opens, so Enter confirms and Escape (Obsidian's own close) cancels. Dismissing the modal any other way answers no. */
+class ConfirmModal extends Modal {
+  private answered = false;
+
+  constructor(
+    app: App,
+    private message: string,
+    private confirmLabel: string,
+    private resolve: (yes: boolean) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen() {
+    this.contentEl.createEl("p", { text: this.message });
+    const row = this.contentEl.createDiv({ cls: "modal-button-container" });
+    row.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+    const ok = row.createEl("button", { cls: "mod-warning", text: this.confirmLabel });
     ok.addEventListener("click", () => {
-      answered = true;
-      modal.close();
-      resolve(true);
+      this.answered = true;
+      this.resolve(true);
+      this.close();
     });
-    modal.onClose = () => {
-      if (!answered) resolve(false);
-    };
-    modal.open();
-  });
+    ok.focus();
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    if (!this.answered) this.resolve(false);
+  }
+}
+
+function confirmInModal(app: App, message: string): Promise<boolean> {
+  return new Promise((resolve) => new ConfirmModal(app, message, "Replace", resolve).open());
 }

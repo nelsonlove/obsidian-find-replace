@@ -28,8 +28,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Online on purpose: this is the last check before a public release, and the directory id collision check needs the network. A failed fetch is only a warning.
       - name: Preflight
-        run: node scripts/preflight.mjs --tag "$GITHUB_REF_NAME" --release --offline
+        run: node scripts/preflight.mjs --tag "$GITHUB_REF_NAME" --release
 
       # One list of assets for the attestation and the release: styles.css only when the plugin ships one.
       - name: Assets

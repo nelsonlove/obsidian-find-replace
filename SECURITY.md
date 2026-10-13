@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security problems privately, not in a public issue. Use GitHub's private vulnerability reporting on this repository (Security tab → Report a vulnerability), or email the maintainer named in `manifest.json`.
+Please report security problems privately, not in a public issue. Private vulnerability reporting is enabled on this repository: open the Security tab and choose "Report a vulnerability", or go to https://github.com/nelsonlove/obsidian-find-replace/security/advisories/new.
 
 You will get an acknowledgement within a week. Fixes ship as a new release; the advisory is published after the fix is available.
 
