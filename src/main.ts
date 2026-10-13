@@ -197,7 +197,7 @@ class FindReplaceView extends ItemView {
   private async runSearch() {
     const built = buildMatcher(this.currentOptions());
     if ("error" in built) {
-      new Notice(`Find & replace: ${built.error}`);
+      new Notice(`Find & Replace: ${built.error}`);
       return;
     }
     const scope = this.scopeSelect.value as Scope;
@@ -210,7 +210,7 @@ class FindReplaceView extends ItemView {
       const editor = this.plugin.app.workspace.activeEditor?.editor;
       const text = editor?.getSelection() ?? "";
       if (text === "") {
-        new Notice("Find & replace: no text selected.");
+        new Notice("Find & Replace: no text selected.");
         this.renderResults(0, false);
         return;
       }
@@ -399,7 +399,7 @@ class FindReplaceView extends ItemView {
     const note =
       `Replaced ${applied} match${applied === 1 ? "" : "es"}` +
       (skipped ? `; skipped ${skipped} (file changed since search)` : "");
-    new Notice(`Find & replace: ${note}`);
+    new Notice(`Find & Replace: ${note}`);
 
     // Re-run so the panel reflects the new state.
     void this.runSearch();
