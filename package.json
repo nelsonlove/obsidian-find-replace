@@ -1,6 +1,6 @@
 {
   "name": "obsidian-find-replace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Multi-file find & replace for Obsidian with preview-and-confirm.",
   "type": "module",
   "main": "main.js",
@@ -8,16 +8,26 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "preflight": "node scripts/preflight.mjs",
+    "lint": "eslint .",
+    "version": "node version-bump.mjs"
   },
-  "keywords": ["obsidian", "find", "replace", "regex", "search"],
+  "keywords": [
+    "obsidian",
+    "find",
+    "replace",
+    "regex",
+    "search"
+  ],
   "author": "Nelson Love",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "builtin-modules": "^3.3.0",
     "esbuild": "^0.20.0",
-    "obsidian": "latest",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.2",
+    "obsidian": "1.7.2",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
   }

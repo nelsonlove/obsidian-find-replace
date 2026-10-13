@@ -1,0 +1,68 @@
+name: Release
+
+# Runs when a bare-version tag is pushed (1.2.3, never v1.2.3). Builds, runs preflight against the tag, signs the assets with a build attestation, and publishes a GitHub release with the plugin assets attached. The community directory reads published releases, so this is not a draft.
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Online on purpose: this is the last check before a public release; it asks the directory about the id and GitHub about private vulnerability reporting. A failed fetch, or a listed id whose repo moved, is a warning here, not a failure.
+      - name: Preflight
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/preflight.mjs --tag "$GITHUB_REF_NAME" --release
+
+      # One list of assets for the attestation and the release: styles.css only when the plugin ships one.
+      - name: Assets
+        id: assets
+        run: |
+          list="main.js,manifest.json"
+          [ -f styles.css ] && list="$list,styles.css"
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+          echo "args=${list//,/ }" >> "$GITHUB_OUTPUT"
+
+      # Build provenance: GitHub signs that these exact files came from this repo's workflow run (docs.obsidian.md, "Release your plugin with GitHub Actions"). Attestations are free on public repos only, so a private repo skips the step.
+      - name: Attest
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.assets.outputs.list }}
+
+      # The CHANGELOG section for this version, when one exists with real content; otherwise GitHub generates the notes.
+      - name: Release notes
+        id: notes
+        run: |
+          node scripts/release-notes.mjs "$GITHUB_REF_NAME" > release-notes.md
+          if [ -s release-notes.md ]; then echo "mode=file" >> "$GITHUB_OUTPUT"; else echo "mode=generate" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ steps.notes.outputs.mode }}" = "file" ]; then
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md ${{ steps.assets.outputs.args }}
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes ${{ steps.assets.outputs.args }}
+          fi
