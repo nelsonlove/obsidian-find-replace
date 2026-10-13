@@ -1,4 +1,4 @@
-import { ItemView, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, Modal, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import {
   Match,
   MatchMode,
@@ -34,21 +34,22 @@ export default class FindReplacePlugin extends Plugin {
   async onload() {
     this.registerView(VIEW_TYPE, (leaf) => new FindReplaceView(leaf, this));
 
-    this.addRibbonIcon("replace", "Find & Replace", () => this.openPanel());
+    this.addRibbonIcon("replace", "Find & replace", () => void this.openPanel());
 
+    // Command names leave out the plugin name: Obsidian shows it in front of them.
     this.addCommand({
       id: "open",
-      name: "Open Find & Replace panel",
-      callback: () => this.openPanel(),
+      name: "Open panel",
+      callback: () => void this.openPanel(),
     });
 
     this.addCommand({
       id: "open-folder",
-      name: "Find & Replace in the current file's folder",
+      name: "Search the current file's folder",
       callback: () => {
         const active = this.app.workspace.getActiveFile();
         const folder = active?.parent?.path ?? "";
-        this.openPanel({ scope: "folder", folder });
+        void this.openPanel({ scope: "folder", folder });
       },
     });
   }
@@ -60,7 +61,7 @@ export default class FindReplacePlugin extends Plugin {
       leaf = workspace.getRightLeaf(false) ?? workspace.getLeaf(true);
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
-    workspace.revealLeaf(leaf);
+    await workspace.revealLeaf(leaf);
     if (preset && leaf.view instanceof FindReplaceView) {
       leaf.view.applyPreset(preset);
     }
@@ -93,7 +94,7 @@ class FindReplaceView extends ItemView {
     return VIEW_TYPE;
   }
   getDisplayText() {
-    return "Find & Replace";
+    return "Find & replace";
   }
   getIcon() {
     return "replace";
@@ -139,7 +140,7 @@ class FindReplaceView extends ItemView {
     this.scopeSelect.createEl("option", { text: "Selection", value: "selection" });
     this.folderInput = scopeRow.createEl("input", {
       cls: "fr-input fr-folder",
-      attr: { type: "text", placeholder: "folder/path" },
+      attr: { type: "text", placeholder: "Folder/path" },
     });
     this.scopeSelect.addEventListener("change", () => this.syncScopeControls());
 
@@ -196,7 +197,7 @@ class FindReplaceView extends ItemView {
   private async runSearch() {
     const built = buildMatcher(this.currentOptions());
     if ("error" in built) {
-      new Notice(`Find & Replace: ${built.error}`);
+      new Notice(`Find & replace: ${built.error}`);
       return;
     }
     const scope = this.scopeSelect.value as Scope;
@@ -209,7 +210,7 @@ class FindReplaceView extends ItemView {
       const editor = this.plugin.app.workspace.activeEditor?.editor;
       const text = editor?.getSelection() ?? "";
       if (text === "") {
-        new Notice("Find & Replace: no text selected.");
+        new Notice("Find & replace: no text selected.");
         this.renderResults(0, false);
         return;
       }
@@ -353,9 +354,10 @@ class FindReplaceView extends ItemView {
     ).length;
     if (
       n >= CONFIRM_THRESHOLD &&
-      !window.confirm(
+      !(await confirmInModal(
+        this.plugin.app,
         `Replace ${n} matches across ${affected} location(s)? This cannot be undone in one step.`,
-      )
+      ))
     ) {
       return;
     }
@@ -397,9 +399,30 @@ class FindReplaceView extends ItemView {
     const note =
       `Replaced ${applied} match${applied === 1 ? "" : "es"}` +
       (skipped ? `; skipped ${skipped} (file changed since search)` : "");
-    new Notice(`Find & Replace: ${note}`);
+    new Notice(`Find & replace: ${note}`);
 
     // Re-run so the panel reflects the new state.
     void this.runSearch();
   }
+}
+
+/** An in-app yes/no question, in place of window.confirm, which blocks the renderer and looks foreign. Resolves false when the modal is dismissed any other way. */
+function confirmInModal(app: App, message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let answered = false;
+    const modal = new Modal(app);
+    modal.contentEl.createEl("p", { text: message });
+    const row = modal.contentEl.createDiv({ cls: "modal-button-container" });
+    row.createEl("button", { text: "Cancel" }).addEventListener("click", () => modal.close());
+    const ok = row.createEl("button", { cls: "mod-warning", text: "Replace" });
+    ok.addEventListener("click", () => {
+      answered = true;
+      modal.close();
+      resolve(true);
+    });
+    modal.onClose = () => {
+      if (!answered) resolve(false);
+    };
+    modal.open();
+  });
 }
