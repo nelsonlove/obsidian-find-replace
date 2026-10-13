@@ -15,9 +15,9 @@ export default defineConfig([
     },
   },
   {
-    // The plugin's own name is a proper noun: "Find & Replace" stays as written in tooltips, titles and notices. Add other brand names and acronyms here as they come up.
+    // The plugin's own name is a proper noun and stays as written in tooltips, titles and notices. Rule options replace, not merge, so the recommended enforceCamelCaseLower is repeated here. Add other brand names and acronyms as they come up.
     rules: {
-      "obsidianmd/ui/sentence-case": ["warn", { brands: ["Find & Replace"], acronyms: [] }],
+      "obsidianmd/ui/sentence-case": ["warn", { enforceCamelCaseLower: true, brands: ["Find & Replace"], acronyms: [] }],
     },
   },
   {

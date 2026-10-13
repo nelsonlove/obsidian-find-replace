@@ -4,7 +4,7 @@ All notable changes to Find & Replace are listed here. The release workflow copi
 
 ## Unreleased
 
-- 
+-
 
 ## 0.2.0 — 2026-10-13
 

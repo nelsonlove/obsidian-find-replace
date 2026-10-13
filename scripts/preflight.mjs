@@ -17,9 +17,15 @@ import { execFileSync } from "node:child_process";
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
+// `--name value`; undefined when absent or when the next token is itself a flag, so `--root --offline` is a usage error, not a directory called --offline.
 const value = (name) => {
   const i = args.indexOf(name);
-  return i === -1 || i + 1 >= args.length ? undefined : args[i + 1];
+  if (i === -1) return undefined;
+  if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+    console.error(`FAIL  usage  — ${name} needs a value`);
+    process.exit(1);
+  }
+  return args[i + 1];
 };
 
 const root = resolve(value("--root") ?? ".");
@@ -66,7 +72,12 @@ function sourceFiles() {
     for (const name of readdirSync(dir)) {
       if (name === "node_modules" || name.startsWith(".")) continue;
       const p = join(dir, name);
-      const st = statSync(p);
+      let st;
+      try {
+        st = statSync(p);
+      } catch {
+        continue; // a dangling symlink or an unreadable entry is not source
+      }
       if (st.isDirectory()) walk(p);
       else if (/\.(ts|tsx|js|mjs)$/.test(name) && name !== "main.js" && !/\.(test|spec)\./.test(name)) out.push(p);
     }
@@ -199,7 +210,8 @@ for (const doc of ["README.md", "PRIVACY.md", "SECURITY.md"]) {
   const text = readFileSync(p, "utf8");
   const problems = [];
   if (/<!--\s*TODO/i.test(text)) problems.push('a "<!-- TODO" comment');
-  if (/\.\s+\/\s+[A-Z]/.test(text)) problems.push('two sentences joined by " / "');
+  // The template's shape exactly: one line, a sentence ending in a period, " / ", then a capitalised alternative. Not a shortcut like "Cmd+. / Ctrl+." or prose across lines.
+  if (/^.+[a-z`)]\. \/ [A-Z`].+$/m.test(text)) problems.push('two sentences joined by " / "');
   if (problems.length) warn(`${doc}: placeholders`, `${problems.join(" and ")} left from the template; keep the true sentence and delete the rest`);
 }
 
@@ -287,33 +299,29 @@ async function checkDirectory() {
   if (byName) warn("directory: name", `"${manifest.name}" is already used by ${byName.repo} (${byName.id})`);
 }
 
-// SECURITY.md (the kit's template) promises GitHub private vulnerability reporting, which is off by default; check the promise when the repo can be asked. GITHUB_TOKEN / GH_TOKEN in CI, or a local gh login.
+// SECURITY.md (the kit's template) promises GitHub private vulnerability reporting, which is off by default; check the promise. The endpoint answers without a token for a public repo; a GITHUB_TOKEN / GH_TOKEN (CI, or a private repo) is sent when present.
 async function checkPrivateReporting() {
   if (flag("--offline")) return;
   const slug = githubSlug();
   const securityPath = join(root, "SECURITY.md");
   if (!slug || !existsSync(securityPath) || !/private vulnerability reporting is enabled/i.test(readFileSync(securityPath, "utf8"))) return;
-  let enabled = null;
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const headers = { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  let outcome;
   try {
-    if (token) {
-      const res = await fetch(`https://api.github.com/repos/${slug}/private-vulnerability-reporting`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(10_000) });
-      if (res.ok) enabled = (await res.json()).enabled === true;
-    } else {
-      const out = execFileSync("gh", ["api", `repos/${slug}/private-vulnerability-reporting`, "--jq", ".enabled"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
-      enabled = out === "true";
-    }
-  } catch {
-    enabled = null;
+    const res = await fetch(`https://api.github.com/repos/${slug}/private-vulnerability-reporting`, { headers, signal: AbortSignal.timeout(10_000) });
+    if (res.ok) outcome = (await res.json()).enabled === true ? "on" : "off";
+    else outcome = `HTTP ${res.status}${token ? " with the token given" : " without a token"}`;
+  } catch (e) {
+    outcome = e.message;
   }
-  if (enabled === true) pass("SECURITY.md: private reporting", "enabled on GitHub, as the file says");
-  else if (enabled === false) warn("SECURITY.md: private reporting", `the file says it is enabled; it is not. Run: gh api -X PUT repos/${slug}/private-vulnerability-reporting`);
-  else warn("SECURITY.md: private reporting", "could not check (no GITHUB_TOKEN/GH_TOKEN and no gh login); the file says it is enabled");
+  if (outcome === "on") pass("SECURITY.md: private reporting", "enabled on GitHub, as the file says");
+  else if (outcome === "off") warn("SECURITY.md: private reporting", `the file says it is enabled; it is not. Run: gh api -X PUT repos/${slug}/private-vulnerability-reporting`);
+  else warn("SECURITY.md: private reporting", `could not check (${outcome}); the file says it is enabled`);
 }
 
-await checkPrivateReporting();
-
-await checkDirectory();
+// The two network checks are independent; run them together so a slow network costs one timeout, not two.
+await Promise.all([checkDirectory(), checkPrivateReporting()]);
 
 // --- report -----------------------------------------------------------------
 

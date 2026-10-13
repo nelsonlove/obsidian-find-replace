@@ -406,7 +406,7 @@ class FindReplaceView extends ItemView {
   }
 }
 
-/** An in-app yes/no question, in place of window.confirm, which blocks the renderer and looks foreign. The confirming button has focus when the modal opens, so Enter confirms and Escape (Obsidian's own close) cancels. Dismissing the modal any other way answers no. */
+/** An in-app yes/no question, in place of window.confirm, which blocks the renderer and looks foreign. The confirming button takes focus once the modal is open, so Enter confirms and Escape (Obsidian's own close) cancels. Dismissing the modal any other way answers no. */
 class ConfirmModal extends Modal {
   private answered = false;
 
@@ -429,7 +429,8 @@ class ConfirmModal extends Modal {
       this.resolve(true);
       this.close();
     });
-    ok.focus();
+    // Modal.open() focuses the first focusable element (Cancel) after onOpen returns; a focus call deferred past that lands on Replace.
+    window.setTimeout(() => ok.focus(), 0);
   }
 
   onClose() {

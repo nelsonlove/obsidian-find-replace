@@ -42,16 +42,22 @@ if (existsSync("CHANGELOG.md")) {
     while (body.length && body[0].trim() === "") body.shift();
     while (body.length && body[body.length - 1].trim() === "") body.pop();
     const section = [`## ${targetVersion} — ${today}`, "", ...(body.length ? [...body, ""] : [])];
-    writeFileSync("CHANGELOG.md", [...lines.slice(0, start), lines[start].trim(), "", "- ", "", ...section, ...lines.slice(end)].join("\n"));
+    writeFileSync("CHANGELOG.md", [...lines.slice(0, start), lines[start].trim(), "", "-", "", ...section, ...lines.slice(end)].join("\n"));
     written.push("CHANGELOG.md");
   } else {
     console.error("version-bump: CHANGELOG.md has no '## Unreleased' section; nothing rolled into the release notes");
   }
 }
 
-// Stage only what was written, so an absent or gitignored CHANGELOG cannot abort the bump; outside a git work tree there is nothing to stage.
+// Stage only what was written, so an absent or gitignored CHANGELOG cannot abort the bump. Outside a git work tree there is nothing to stage; inside one, a failing `git add` must fail the bump, or npm would commit and tag a half-done release.
+let inGit = false;
 try {
   execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { stdio: "ignore" });
+  inGit = true;
+} catch {
+  // not a git work tree
+}
+if (inGit) {
   const stageable = written.filter((f) => {
     try {
       execFileSync("git", ["check-ignore", "-q", f], { stdio: "ignore" });
@@ -61,7 +67,12 @@ try {
       return true;
     }
   });
-  if (stageable.length) execFileSync("git", ["add", ...stageable], { stdio: "inherit" });
-} catch {
-  // not a git work tree
+  if (stageable.length) {
+    try {
+      execFileSync("git", ["add", ...stageable], { stdio: "inherit" });
+    } catch (e) {
+      console.error(`version-bump: git add failed (${e.message}); the bump is not staged, stopping before npm commits a half-done release`);
+      process.exit(1);
+    }
+  }
 }
