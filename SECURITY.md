@@ -8,4 +8,4 @@ You will get an acknowledgement within a week. Fixes ship as a new release; the 
 
 ## Scope
 
-Find & Replace runs inside Obsidian with the same local privileges as any community plugin. It makes no network requests of its own unless the README says otherwise. Review the source and keep a backup of your vault, as with any plugin.
+Find & Replace runs inside Obsidian with the same local privileges as any community plugin. It makes no network requests and stores nothing (see `PRIVACY.md`). Review the source and keep a backup of your vault, as with any plugin.

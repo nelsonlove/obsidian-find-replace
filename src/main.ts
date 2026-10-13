@@ -34,7 +34,7 @@ export default class FindReplacePlugin extends Plugin {
   async onload() {
     this.registerView(VIEW_TYPE, (leaf) => new FindReplaceView(leaf, this));
 
-    this.addRibbonIcon("replace", "Find & replace", () => void this.openPanel());
+    this.addRibbonIcon("replace", "Find & Replace", () => void this.openPanel());
 
     // Command names leave out the plugin name: Obsidian shows it in front of them.
     this.addCommand({
@@ -94,7 +94,7 @@ class FindReplaceView extends ItemView {
     return VIEW_TYPE;
   }
   getDisplayText() {
-    return "Find & replace";
+    return "Find & Replace";
   }
   getIcon() {
     return "replace";
@@ -433,7 +433,6 @@ class ConfirmModal extends Modal {
   }
 
   onClose() {
-    this.contentEl.empty();
     if (!this.answered) this.resolve(false);
   }
 }

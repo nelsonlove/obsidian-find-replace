@@ -7,11 +7,11 @@ import { existsSync, readFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 const fileIdx = args.indexOf("--file");
-const file = fileIdx !== -1 ? args[fileIdx + 1] : "CHANGELOG.md";
 // The version is the positional that is not the --file value, whichever order they come in. (-1 when there is no --file: fileIdx + 1 would be 0, the first positional.)
 const fileValueIdx = fileIdx === -1 ? -1 : fileIdx + 1;
+const file = fileIdx === -1 ? "CHANGELOG.md" : args[fileValueIdx];
 const version = args.find((a, i) => !a.startsWith("--") && i !== fileValueIdx);
-if (!version) {
+if (!version || (fileIdx !== -1 && (!file || file.startsWith("--")))) {
   console.error("usage: release-notes <version> [--file CHANGELOG.md]");
   process.exit(2);
 }

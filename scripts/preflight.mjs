@@ -192,6 +192,17 @@ if (!licenseFile) fail("LICENSE", "missing");
 else pass("LICENSE", licenseFile);
 if (!existsSync(join(root, "SECURITY.md"))) warn("SECURITY.md", "missing; a private reporting route is expected");
 
+// The kit's README and PRIVACY templates carry a "<!-- TODO" and two sentences joined by " / " for the maintainer to resolve; a release must not ship either.
+for (const doc of ["README.md", "PRIVACY.md", "SECURITY.md"]) {
+  const p = join(root, doc);
+  if (!existsSync(p)) continue;
+  const text = readFileSync(p, "utf8");
+  const problems = [];
+  if (/<!--\s*TODO/i.test(text)) problems.push('a "<!-- TODO" comment');
+  if (/\.\s+\/\s+[A-Z]/.test(text)) problems.push('two sentences joined by " / "');
+  if (problems.length) warn(`${doc}: placeholders`, `${problems.join(" and ")} left from the template; keep the true sentence and delete the rest`);
+}
+
 // --- source -----------------------------------------------------------------
 
 // When the repo lints with the Obsidian team's own rules, those cover command ids, global app, hotkeys and more properly; the regex checks below are the fallback for repos without them.
@@ -268,11 +279,39 @@ async function checkDirectory() {
   const slug = githubSlug();
   const byId = list.find((p) => p.id === manifest.id);
   if (byId && slug && byId.repo.toLowerCase() === slug.toLowerCase()) pass("directory: id", `${manifest.id} is already listed for ${slug}`);
+  // Under --release a tag is already pushed, and a listed plugin whose repo moved would otherwise be blocked from ever releasing; the id is claimed in kit-submit, where this stays a failure.
+  else if (byId && flag("--release")) warn("directory: id", `"${manifest.id}" is listed for ${byId.repo}, not ${slug ?? "this repo"}; fine if the repo moved, otherwise choose another id`);
   else if (byId) fail("directory: id", `"${manifest.id}" is taken by ${byId.repo}; choose another id`);
   else pass("directory: id", `${manifest.id} is free`);
   const byName = list.find((p) => p.name.toLowerCase() === String(manifest.name).toLowerCase() && p.id !== manifest.id);
   if (byName) warn("directory: name", `"${manifest.name}" is already used by ${byName.repo} (${byName.id})`);
 }
+
+// SECURITY.md (the kit's template) promises GitHub private vulnerability reporting, which is off by default; check the promise when the repo can be asked. GITHUB_TOKEN / GH_TOKEN in CI, or a local gh login.
+async function checkPrivateReporting() {
+  if (flag("--offline")) return;
+  const slug = githubSlug();
+  const securityPath = join(root, "SECURITY.md");
+  if (!slug || !existsSync(securityPath) || !/private vulnerability reporting is enabled/i.test(readFileSync(securityPath, "utf8"))) return;
+  let enabled = null;
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  try {
+    if (token) {
+      const res = await fetch(`https://api.github.com/repos/${slug}/private-vulnerability-reporting`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(10_000) });
+      if (res.ok) enabled = (await res.json()).enabled === true;
+    } else {
+      const out = execFileSync("gh", ["api", `repos/${slug}/private-vulnerability-reporting`, "--jq", ".enabled"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+      enabled = out === "true";
+    }
+  } catch {
+    enabled = null;
+  }
+  if (enabled === true) pass("SECURITY.md: private reporting", "enabled on GitHub, as the file says");
+  else if (enabled === false) warn("SECURITY.md: private reporting", `the file says it is enabled; it is not. Run: gh api -X PUT repos/${slug}/private-vulnerability-reporting`);
+  else warn("SECURITY.md: private reporting", "could not check (no GITHUB_TOKEN/GH_TOKEN and no gh login); the file says it is enabled");
+}
+
+await checkPrivateReporting();
 
 await checkDirectory();
 

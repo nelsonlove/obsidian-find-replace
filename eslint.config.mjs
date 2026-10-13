@@ -15,6 +15,12 @@ export default defineConfig([
     },
   },
   {
+    // The plugin's own name is a proper noun: "Find & Replace" stays as written in tooltips, titles and notices. Add other brand names and acronyms here as they come up.
+    rules: {
+      "obsidianmd/ui/sentence-case": ["warn", { brands: ["Find & Replace"], acronyms: [] }],
+    },
+  },
+  {
     ignores: ["main.js", "node_modules/", "scripts/", "version-bump.mjs", "esbuild.config.mjs"],
   },
 ]);
